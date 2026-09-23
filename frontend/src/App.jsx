@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DocumentList from './components/DocumentList';
 import UploadComponent from './components/UploadComponent';
 import { listDocuments } from './services/api';
@@ -9,32 +9,49 @@ export default function App() {
   const [documents, setDocuments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
-
-  async function loadDocuments() {
-    if (!userId.trim()) {
-      setDocuments([]);
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      const response = await listDocuments(userId.trim());
-      setDocuments(response.documents);
-      setErrorMessage('');
-    } catch (error) {
-      setErrorMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  const currentUserId = useRef(userId);
+  currentUserId.current = userId.trim();
 
   useEffect(() => {
-    loadDocuments();
+    const requestedUserId = userId.trim();
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      if (!requestedUserId) {
+        setDocuments([]);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+
+      try {
+        const response = await listDocuments(requestedUserId, { signal: controller.signal });
+        if (currentUserId.current === requestedUserId) {
+          setDocuments(response.documents);
+          setErrorMessage('');
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError' && currentUserId.current === requestedUserId) {
+          setErrorMessage(error.message);
+        }
+      } finally {
+        if (!controller.signal.aborted && currentUserId.current === requestedUserId) {
+          setIsLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [userId]);
 
   function handleUploaded(document) {
+    if (document.owner !== currentUserId.current) {
+      return;
+    }
+
     setDocuments((currentDocuments) => [document, ...currentDocuments]);
     setErrorMessage('');
   }

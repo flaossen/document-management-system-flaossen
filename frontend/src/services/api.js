@@ -1,4 +1,4 @@
-const API_PREFIX = '/api';
+const API_PREFIX = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export class ApiError extends Error {
   constructor(status, code, message) {
@@ -9,73 +9,71 @@ export class ApiError extends Error {
   }
 }
 
-async function requestJson(url, options = {}) {
+async function request(url, options = {}) {
   const response = await fetch(`${API_PREFIX}${url}`, options);
 
   if (!response.ok) {
-    let errorBody;
-
-    try {
-      errorBody = await response.json();
-    } catch {
-      errorBody = null;
-    }
-
-    throw new ApiError(
-      response.status,
-      errorBody?.error?.code || 'REQUEST_FAILED',
-      errorBody?.error?.message || 'Não foi possível concluir a solicitação.',
-    );
+    throw await createApiError(response, 'REQUEST_FAILED', 'Não foi possível concluir a solicitação.');
   }
+
+  return response;
+}
+
+export async function listDocuments(userId, options = {}) {
+  const response = await request('/documents', {
+    headers: { 'X-User-Id': userId },
+    ...options,
+  });
 
   return response.json();
 }
 
-export function listDocuments(userId) {
-  return requestJson('/documents', {
-    headers: { 'X-User-Id': userId },
-  });
-}
-
-export function uploadDocument(file, userId) {
+export async function uploadDocument(file, userId, options = {}) {
   const formData = new FormData();
   formData.append('file', file);
 
-  return requestJson('/upload', {
+  const response = await request('/upload', {
     method: 'POST',
     headers: { 'X-User-Id': userId },
     body: formData,
+    ...options,
   });
+
+  return response.json();
 }
 
-export async function downloadDocument(documentId, userId) {
-  const response = await fetch(`${API_PREFIX}/documents/${encodeURIComponent(documentId)}/download`, {
+export async function downloadDocument(documentId, userId, options = {}) {
+  const response = await request(`/documents/${encodeURIComponent(documentId)}/download`, {
     headers: { 'X-User-Id': userId },
+    ...options,
   });
-
-  if (!response.ok) {
-    let errorBody;
-
-    try {
-      errorBody = await response.json();
-    } catch {
-      errorBody = null;
-    }
-
-    throw new ApiError(
-      response.status,
-      errorBody?.error?.code || 'DOWNLOAD_FAILED',
-      errorBody?.error?.message || 'Não foi possível baixar o documento.',
-    );
-  }
 
   const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = objectUrl;
   link.download = getFileName(response.headers.get('Content-Disposition')) || 'documento';
+  link.style.display = 'none';
+  document.body.append(link);
   link.click();
-  URL.revokeObjectURL(objectUrl);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+async function createApiError(response, fallbackCode, fallbackMessage) {
+  let errorBody;
+
+  try {
+    errorBody = await response.json();
+  } catch {
+    errorBody = null;
+  }
+
+  return new ApiError(
+    response.status,
+    errorBody?.error?.code || fallbackCode,
+    errorBody?.error?.message || fallbackMessage,
+  );
 }
 
 function getFileName(contentDisposition) {
