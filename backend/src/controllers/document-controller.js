@@ -1,5 +1,3 @@
-const { AppError } = require('../errors');
-
 class DocumentController {
   constructor({ service }) {
     this.service = service;
@@ -32,10 +30,6 @@ class DocumentController {
 
   download(req, res, next) {
     try {
-      if (!req.params.id || /[\\/]|\.\.|\u0000/.test(req.params.id)) {
-        throw new AppError(400, 'INVALID_DOCUMENT_ID', 'O identificador do documento é inválido.');
-      }
-
       const document = this.service.getDownload(req.params.id, req.userId);
       res.type(document.mimeType || 'application/octet-stream');
       res.download(document.filePath, document.originalName, (error) => {

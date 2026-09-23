@@ -1,5 +1,7 @@
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const multer = require('multer');
+const path = require('node:path');
 const { AppError } = require('../errors');
 const { validateUserId } = require('../services/document-service');
 
@@ -29,14 +31,44 @@ function createDocumentRouter({ config, controller }) {
 
   function requireUser(req, res, next) {
     try {
-      req.userId = validateUserId(req.get('X-User-Id'));
+      const userId = validateUserId(req.get('X-User-Id'));
+
+      if (config.authMode === 'hmac') {
+        const signature = req.get('X-User-Signature') || '';
+        const expectedSignature = crypto
+          .createHmac('sha256', config.userHeaderSecret)
+          .update(userId)
+          .digest('hex');
+        const received = Buffer.from(signature, 'utf8');
+        const expected = Buffer.from(expectedSignature, 'utf8');
+
+        if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
+          throw new AppError(401, 'INVALID_USER_SIGNATURE', 'A identidade do usuário não pôde ser validada.');
+        }
+      }
+
+      req.userId = userId;
       next();
     } catch (error) {
       next(error);
     }
   }
 
-  router.post('/upload', requireUser, upload.single('file'), controller.upload);
+  function parseUpload(req, res, next) {
+    upload.single('file')(req, res, (error) => {
+      if (error) {
+        if (req.documentId) {
+          fs.rmSync(path.join(config.storagePath, req.documentId), { force: true });
+        }
+        next(error);
+        return;
+      }
+
+      next();
+    });
+  }
+
+  router.post('/upload', requireUser, parseUpload, controller.upload);
   router.get('/documents', requireUser, controller.list);
   router.get('/documents/:id/download', requireUser, controller.download);
 
